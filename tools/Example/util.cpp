@@ -57,6 +57,7 @@ llvm::cl::opt<std::string> IOMAP(cl::Positional, llvm::cl::desc("<IO Map for the
 llvm::cl::opt<std::string> kleeFile("k", llvm::cl::desc("<KLEE Compatible bc for taint analysis/symex>"), cl::Optional);
 
 llvm::cl::opt<std::string> partGuide("p", llvm::cl::desc("<KLEE Compatible bc for taint analysis/symex>"), cl::Optional);
+llvm::cl::opt<std::string> os("op", llvm::cl::desc("Operating system information"), cl::Optional);
 
 
 llvm::cl::opt<bool> LEAKCHECKER("leak", llvm::cl::init(false),

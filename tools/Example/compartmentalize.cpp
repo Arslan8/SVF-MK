@@ -1122,9 +1122,7 @@ int compartmentalize(char * argv[]) {
 #endif 
 
 		ofstream threads;
-#undef FREERTOS
-#define FREERTOS
-#ifdef ZEPHYR
+		vector<llvm::Value *> thread_vec;
 		if (os == "zephyr") {
 		threads.open("./threads");
 		/* Get static threads for Zephyr */
@@ -1140,10 +1138,7 @@ int compartmentalize(char * argv[]) {
 		}
 		}
 
-#endif
-#ifdef FREERTOS
 		if (os == "freertos") {
-		vector<llvm::Value *> thread_vec;
 		threads.open("./threads");
 		for (SVFModule::llvm_iterator F = svfModule->llvmFunBegin(), E = svfModule->llvmFunEnd(); F != E; ++F) {
 				Function *fun = *F;
@@ -1243,11 +1238,8 @@ int compartmentalize(char * argv[]) {
 
 		}
 
-#endif
 
-#ifdef ARDU
 		if (os == "ardupilot") {
-		vector<llvm::Value *> thread_vec;
 		threads.open("./threads");
 #if 0
 		for (SVFModule::llvm_iterator F = svfModule->llvmFunBegin(), E = svfModule->llvmFunEnd(); F != E; ++F) {
@@ -1339,7 +1331,6 @@ int compartmentalize(char * argv[]) {
 #endif 
 		}
 		}
-#endif 
 
 
 		cerr<<"Printing Class Hierarchy:"<<endl;
@@ -1352,6 +1343,8 @@ int compartmentalize(char * argv[]) {
 				}
 		}
 
+		//This code is for structural matching of tasks.
+#if 0 
 		for (auto G = svfModule->global_begin(), E = svfModule->global_end(); G != E; ++G) {
 				auto glob = &*G;
 
@@ -1403,6 +1396,10 @@ int compartmentalize(char * argv[]) {
 						}
 				} 
 		}
+#endif 
+
+		//I have no idea what this code was doing
+#if 0
 		std::string pag_str = "pag";
 		//fspta->getPAG()->dump(pag_str);
 		cerr << pag_str<<endl;
@@ -1427,7 +1424,11 @@ int compartmentalize(char * argv[]) {
 				}
 		}
 		}
+#endif 
 
+
+	//C++ Analysis code to walk vtables
+#if 0
 		find_vtables(vtables);
 
 		for (SVFModule::llvm_iterator F = svfModule->llvmFunBegin(), E = svfModule->llvmFunEnd(); F != E; ++F) { 
@@ -1501,6 +1502,7 @@ int compartmentalize(char * argv[]) {
 						cerr<<fun->getName().str()<<endl;
 				}
 		}
+#endif 
 
 
 

@@ -129,5 +129,7 @@ llvm::cl::opt<bool> LEAKCHECKER("leak", llvm::cl::init(false),
 #endif 
 extern llvm::cl::opt<bool> PRINT_PTS_TO;
 extern llvm::cl::opt<bool> DUMP;
-#endif 
+#endif
+
+extern llvm::cl::opt<std::string> os;
 int analyze();
