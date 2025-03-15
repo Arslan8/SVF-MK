@@ -1,7 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/python2.7
 
 import sys, getopt
 import math
+
+fragmentation=0
  
 # Function to check
 # Log base 2
@@ -62,17 +64,21 @@ def writeDataSections(dpatch, dsections):
 
 
 def fixup(section):
+		global fragmentation
 		if section[0] == 0:
 			print "Returning empty section"
 			return section[0]
 		if section[0] < 32:
+			fragmentation += (32 - section[0])
 			section[0] = 32
 		upSize = 2 ** math.ceil(Log2(section[0]))
+		fragmentation += (int(upSize) - section[0])
 		section[0] = int(upSize)
 		if section[1] %section[0]:
 				div = section[1]/section[0]
 				div += 1
 				print ("Update from: " + str(section[1])+ " to:"+ str(section[0] * div))
+				fragmentation += ((section[0] * div) - section[1])
 				section[1] = int(section[0] * div)
 		print(section)
 		return section[0]+section[1]
@@ -94,17 +100,20 @@ def updateSize(codesections):
 
 
 def printSortedAndFixupSections(sections, start):
+	totalSize = 0
 	lc = start
 	elemi = ''.join([i for i in list(sections.keys())[0] if not i.isdigit()])
 	for elem in range(len(sections)):
 		print(elemi + str(elem) + ":")
 		print(sections[elemi + str(elem)])
+		totalSize += sections[elemi + str(elem)][0]
 		if not lc == -1: 
 			sections[elemi + str(elem)][1] = lc 
 		if not sections[elemi + str(elem)][0] == 0:
 			valid(sections[elemi + str(elem)][1],sections[elemi + str(elem)][0])
 			lc = fixup(sections[elemi + str(elem)]) #Location counter tells from where the next section base should begin.
 			print(sections[elemi + str(elem)])
+	return totalSize
 
 def printSortedAndVerifSections(sections):
 	elemi = ''.join([i for i in list(sections.keys())[0] if not i.isdigit()])
@@ -116,6 +125,7 @@ def printSortedAndVerifSections(sections):
 	
 
 def main(argv):
+	global fragmentation
 	inputfile = ''
 	outputfile = ''
 	try:
@@ -168,7 +178,13 @@ def main(argv):
 									num = int(word)
 									secinfo[line.split(" ")[0]].append(num)
 
-	print(secinfo)
+	devinfo = []
+	#TODO: TODO:Fix address
+	with open("./partitioner/out/rtmk.devautogen") as f:
+		lines = f.readlines()
+		for line in lines:
+			devinfo.append(line)
+
 
 	# MPU Requirements dictate that 
 	#	1. size is power of 2
@@ -186,11 +202,20 @@ def main(argv):
 		 	datasections[section] = [size, base]
 
 	lumpText = [rtmkCode[0]+rtmkCode[1] - FLASH_BASE, FLASH_BASE]
-	printSortedAndFixupSections(codesections, fixup(lumpText))
+	stat= open("./linker.stat", "w")
+	fragmentation=0
+	size = printSortedAndFixupSections(codesections, fixup(lumpText))
+	codeFragmentation = fragmentation
+	stat.write(str(size)+"\n")
+	stat.write(str(codeFragmentation)+"\n")
+	fragmentation  = 0
 	print("LumpTexzt:************")
 	print(lumpText)
 	lumpData = [rtmkData[0]+rtmkData[1] - RAM_BASE, RAM_BASE]
-	printSortedAndFixupSections(datasections, fixup(lumpData))
+	size = printSortedAndFixupSections(datasections, fixup(lumpData))
+	dataFragmentation = fragmentation
+	stat.write(str(size)+"\n")
+	stat.write(str(dataFragmentation)+"\n")
 	print("LumpData:*************")
 	print(lumpData)
 	
@@ -214,9 +239,10 @@ def main(argv):
 	endstring = "}; \n"
 	f = open(configFile, "w")
 	f.write(prologue_string)
-	print(datasections)
+#print(datasections)
 	i =0
 	
+	print(devinfo)
 	for sect in range(len(codesections)):
 			section = ".csection" + str(sect)
 			dsection = section 
@@ -227,30 +253,31 @@ def main(argv):
 			f.write("{")
 			f.write(str(csection[1]))#Offset
 			f.write(",")
-			print(section +":")
-			print(hex(int(csection[1])))
-			print(hex(int(csection[0])))
+#			print(section +":")
+#			print(hex(int(csection[1])))
+#			print(hex(int(csection[0])))
 
 			f.write(sizeRegionMap[csection[0]])#Size
 			f.write(",")
 			f.write(str(dsection[1]))
 			f.write(",")
-			print(hex(int(dsection[1])))
-			print(hex(int(dsection[0])))
+#			print(hex(int(dsection[1])))
+#			print(hex(int(dsection[0])))
 			f.write(sizeRegionMap[dsection[0]])
 			f.write(",")
 			f.write(str(csection[0] + csection[1]))
 			f.write(",")
 			f.write(str(dsection[0] + dsection[1]))
+			f.write("," + devinfo[i])
 			f.write("}")
 			i +=1
 			if i!= len(codesections):
 					f.write(",")
 	f.write(endstring)
-	f.write("int code_base= "+ str(FLASH_BASE) + ";\n");
-	f.write("int code_size= "+ str(sizeRegionMap[codesections[".csection0"][1] - FLASH_BASE]) +";\n")
-	f.write("int data_base= "+ str(RAM_BASE) + ";\n");
-	f.write("int data_size= "+ str(sizeRegionMap[datasections[".osection0"][1] - RAM_BASE]) + ";\n")
+	f.write("RTMK_DATA int code_base= "+ str(FLASH_BASE) + ";\n");
+	f.write("RTMK_DATA int code_size= "+ str(sizeRegionMap[codesections[".csection0"][1] - FLASH_BASE]) +";\n")
+	f.write("RTMK_DATA int data_base= "+ str(RAM_BASE) + ";\n");
+	f.write("RTMK_DATA int data_size= "+ str(sizeRegionMap[datasections[".osection0"][1] - RAM_BASE]) + ";\n")
 
 
 

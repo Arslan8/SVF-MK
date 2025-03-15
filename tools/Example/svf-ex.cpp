@@ -28,9 +28,12 @@
 #include "util.h"
 #include "ec.h"
 #include "crt.h"
+#include "etsan.h"
 bool EC = true;
 bool TestPass = false;
-bool CRT = false;
+bool CRT = false; bool emitAll = true;
+bool ETSAN = false;
+bool analyzecode = true;
 int main(int argc, char ** argv) {
     int error_value = 0;
     parseArguments(argc,argv);
@@ -38,24 +41,34 @@ int main(int argc, char ** argv) {
 
     if (EC) {
         compartmentalize(argv);
-        return 0;
     }
     if (TestPass) {
         error_value = testPass();
         return error_value;
     }
+	if (analyzecode) {
+		analyze();
+	}
     if (CRT) {
-            //error_value = driverIsolation();
-            if (true) {
+			printBanner("Driver Isolation");
+            error_value = driverIsolation();
+			return 0;
+
+            if (error_value || emitAll) {
+					printBanner("Task Kernel Isolation");
                     error_value = taskKernelVoilations();
-					error_value &= taskTaskVoilations();
-                    if (!error_value) {
+
+					if (error_value || emitAll) {
+					   printBanner("Task Task Isolation");
                        /* Check task-task voilations */
                        error_value = taskTaskVoilations();
                     }
             }
     }
-	updateBC();
+	if (ETSAN) {
+			etsan();
+	}
+	//updateBC();
 
     //Temp for debugging and hacking
     return error_value;

@@ -20,10 +20,25 @@ runf: FORCE
 	cp ./temp.bc  /home/arslan/stm32_discovery_arm_gcc/blinky/temp.bc
 	llvm-dis ./temp.bc
 
+#runfs: FORCE
+#	./run4
+#	llvm-dis ./temp.bc
+#	cp ./temp.bc  ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/build/RTOSDemo.axf.bc
+
 runfs: FORCE
+	cd partitioner && make run
+
+runfd: FORCE
 	./run4
 	llvm-dis ./temp.bc
-	cp ./temp.bc  ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/build/RTOSDemo.axf.bc
+
+runfc: FORCE
+	./run4
+	llvm-dis ./temp.bc
+
+runnfs: FORCE
+	./run4
+	llvm-dis ./temp.bc
 
 FORCE:
 
@@ -55,7 +70,13 @@ ld:
 	./setupLD.py -n 6 -l /home/arslan/stm32_discovery_arm_gcc/blinky/stm32_flash.overlay -c /home/arslan/stm32_discovery_arm_gcc/blinky/./autogen_data.c
 
 ldF:
-	./setupLD.py -n 19 -l ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./scripts/stm32_flash.overlay -c ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./autogen_data.c -H /home/arslan/projects/LBC/FreeRTOS/FreeRTOS/Source/portable/MemMang/autogen_heap.c
+	./setupLD.py -n 20 -l ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./scripts/stm32_flash.overlay -c ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./autogen_data.c -H /home/arslan/projects/LBC/FreeRTOS/FreeRTOS/Source/portable/MemMang/autogen_heap.c
+
+#ldFp:
+#	./setupLD.py -n $(shell cat ./.policy | wc -l) -l ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./scripts/stm32_flash.overlay -c ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./autogen_data.c -H /home/arslan/projects/LBC/FreeRTOS/FreeRTOS/Source/portable/MemMang/autogen_heap.c
+
+ldFp:
+	./setupLD.py -n $(shell cat ./partitioner/out/.policy | wc -l) -l ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./scripts/stm32_flash.overlay -c ~/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M4F_STM32F407ZG-SK/./autogen_data.c -H /home/arslan/projects/LBC/FreeRTOS/FreeRTOS/Source/portable/MemMang/autogen_heap.c
 
 verif:
 	./checkMPUReq.py -i /home/arslan/stm32_discovery_arm_gcc/blinky/sizeinfo -l /home/arslan/stm32_discovery_arm_gcc/blinky/stm32_flash.overlay -c /home/arslan/stm32_discovery_arm_gcc/blinky/./autogen_data.c

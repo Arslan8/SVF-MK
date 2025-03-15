@@ -1,20 +1,37 @@
 #!/usr/bin/python
 
 import sys, getopt
-funcs = {} # This is the PDG
-data ={}
-cfg = {} #This remains the CFG
-compartments=[]
-compartmentMap={}
-policy = "thread"
+import copy
+import json
+from cmsis_svd.parser import SVDParser
+from random import *
+from os.path import exists
+
+funcs = {} 		# This is the PDG
+data ={}		# This gives which data is used by which function
+cfg = {} 		# This remains the CFG
+compartments=[] # This gives the different compartments in the system
+compartmentMap={} # This gives the function to compartment map
+policy = "file" # Select policy, possible values: device, color, file, component, thread
+
 
 def newCompartment():
+		global compartments
 		compartment = []
 		compartments.append(compartment)
 		return compartment
 
+def deleteEmptyCompartment(comp):
+		global compartments
+		if len(comp) != 0:
+			print("Wrong way of calling function")
+			exit()
+		compartments.remove(comp)
+		
+
 def addToCompartment(func, compartment):
 		global compartmentMap
+		global compartments
 		if func in compartmentMap:
 			oldCompartment = compartmentMap[func]
 			compartmentMap[func] = compartment
@@ -26,6 +43,39 @@ def addToCompartment(func, compartment):
 			compartment.append(func)
 			compartmentMap[func] = compartment
 
+def resetPartitions():
+	global compartments
+	global compartmentMap
+	compartments= [] # This gives the different compartments in the system
+	compartmentMap= {}
+
+
+def getSVDHandle(oem,model):
+	return SVDParser.for_packaged_svd(oem, model).get_device().peripherals
+
+def getDevice(addr, peripherals):
+	addr = int(addr, 16)
+	# Make sure this is a device, this is a possible circumvent around the enforced protections
+	# a malicious program can hardcode to other compartment's memory, make sure we don't allow it
+	if not (addr>= 0x40000000 and addr <=0x60000000):
+		#print("Private region or protected region used:" + hex(addr))
+		return None, 0, 0
+	for peripheral in peripherals:
+		if  peripheral._address_block is not None:
+			if ((addr >= peripheral.base_address) and (addr < (peripheral.base_address + peripheral._address_block.size))):
+				return peripheral, peripheral.base_address, peripheral._address_block.size
+		elif peripheral.get_derived_from():
+			derivedFrom = peripheral.get_derived_from()
+			if derivedFrom._address_block is not None:
+				if ((addr >= peripheral.base_address) and (addr < (peripheral.base_address + derivedFrom._address_block.size))):
+						return peripheral, peripheral.base_address, derivedFrom._address_block.size
+		elif peripheral.size is not None:
+		  	if ((addr >= peripheral.base_address) and (addr < (peripheral.base_address + peripheral.size))):
+				return peripheral, peripheral.base_address, peripheral.size
+
+	print("Device not found:" + hex(addr))
+	return None, 0, 0
+	
 def mergeComponentsExcept(tCompartments):
 	global funcs
 	global data
@@ -39,6 +89,7 @@ def mergeComponentsExcept(tCompartments):
 			for obj in list(compartment):
 				addToCompartment(obj, comp)
 
+#Merge compartments, but really we move all compartments from compartment2 to compartmen1
 def mergeCompartments(compartment1, compartment2):
 	for fun in list(compartment2):
 		addToCompartment(fun, compartment1)
@@ -101,9 +152,8 @@ def paint():
 		#Repaint
 #print("Different Compartments before in the colored compart:")
 #		print(colors)
-			policy = "cherrypick" #while painting cherry pick the minimum set of objects for consistent coloring
-#policy = "submerge" # while painting pick everything 
-			if policy == "cherrypick":
+			cPolicy = "submerge" #while painting cherry pick the minimum set of objects for consistent coloring
+			if cPolicy == "cherrypick":
 				compartment = []
 				for color in colors:
 					for obj in color:
@@ -116,7 +166,7 @@ def paint():
 						if len(oldCompartment) == 0:
 							compartments.remove(oldCompartment)
 				compartments.append(compartment)
-			elif policy == "submerge":
+			elif cPolicy == "submerge":
 				compartment = []
 				for color in colors:
 					oldCompartment = color
@@ -196,6 +246,7 @@ def printStats():
 		objCount +=1
 	print("Total Variables: " + str(objCount - funcount))
 	print("Total Objects:" +str(objCount))
+	printLooseFunctions()
 	printCompartments =False
 	j = len(compartments)
 	original_stdout = sys.stdout
@@ -230,6 +281,7 @@ def printLooseFunctions():
 	global compartments
 	global compartmentMap
 	printLoseObjects = True
+	print("Now we print Loose objects")
 	if printLoseObjects:
 		for func in funcs:
 			if func not in compartmentMap:
@@ -240,11 +292,13 @@ def printLooseFunctions():
 				print("************Lost Object ***********")
 				print var
 				print(data[var])
-ffmap = {}
-files = {}
-fdmap = {}
-dfmap = {}
-dfmapCoarse = {}
+	print("End of loose objects")
+ffmap = {} #Function file map
+datafmap = {} #Data to file map
+files = {} # Files map
+fdmap = {} # Function to data map?
+dfmap = {} # Device to function map?
+dfmapCoarse = {} # Devices used by the firmare but mapped to a 4K boundary to function map but coursed?
 import os
 def compCheck():
 	print("*******COMPCHECKSTART********")
@@ -263,7 +317,7 @@ def main(argv):
 	global compartmentMap
 	global policy 
 	try:
-		opts, args = getopt.getopt(argv,"hc:d:",["cfile=","dfile="])
+		opts, args = getopt.getopt(argv,"hc:d:p:",["cfile=","dfile=","partConfig="])
 	except getopt.GetoptError:
 		print 'test.py -i <inputfile> -o <outputfile>'
 		sys.exit(2)
@@ -276,10 +330,17 @@ def main(argv):
 		elif opt in ("-d", "--dfile"):
 			dfg = arg
 
+	#See if partition cache available
+
+	if (exists("./.policy")):
+		print("HELLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLOOOOOOOOOOOOOOOOOOOOOOOO")
+		return
+	
 	cfg = "./cg"
 	cmd = "opt  --print-callgraph " + bc +" 2> cg"
 	os.system(cmd)
 
+	
 	ffmapFile = "./ffmap"
 	with open(ffmapFile) as f:
 		lines = f.readlines()
@@ -287,11 +348,23 @@ def main(argv):
 			line = line.replace("\n","")
 			[func, fileN] = line.split("##")
 			ffmap[func] = fileN
+	datafmapFile = "./dfmap"
+	with open(datafmapFile) as f:
+		lines = f.readlines()
+		for line in lines:
+			line = line.replace("\n","")
+			[func, fileN] = line.split("##")
+			datafmap[func] = fileN
 
 	for func in ffmap:
 		if ffmap[func] not in files:
 			files[ffmap[func]] = []
 		files[ffmap[func]].append(func)
+
+	for obj_elem in datafmap:
+		if datafmap[obj_elem] not in files:
+			print(datafmap[obj_elem] +"is a data only file")
+			files[datafmap[obj_elem]] = [] 
 
 	fdmapFile = "./fdmap"
 	with open(fdmapFile) as f:
@@ -309,9 +382,11 @@ def main(argv):
 	for f in fdmap:
 		for addr in fdmap[f]:
 			if addr in dfmap:
-				dfmap[addr].append(f)
+				if f not in dfmap[addr]:
+					dfmap[addr].append(f)
 			else:
 				dfmap[addr] = [f]
+	#Test this map later
 
 	for addr in dfmap:
 		base = int(addr, 0) & 0xFFFFF000
@@ -528,9 +603,6 @@ def main(argv):
 	]
 #k_ prequel for threading
 
-	policy = "device"
-#policy = "thread"
-	policy = "device"
 	threads = ["prvQueueReceiveTask", "prvQueueSendTask"]
 
 	#For Zephyr
@@ -543,11 +615,13 @@ def main(argv):
 		i +=1
 
 
-	policy = "file"
-
-	if policy == "coloring":
+	if policy == "color":
 		paint()
 		spreadPaint()
+		# In coloring we usually generate a lot of compartments which usually don't fit in memory
+		# because of alignment requirements. Therefore we need to constraint the number of compartments.	
+		while len(compartments) > 1:
+			mergeCompartments(compartments[0], compartments[1])
 	elif policy == "thread":
 		threadComp(threads)
 		tCompartments = []
@@ -560,8 +634,6 @@ def main(argv):
 
 	elif policy == "component":
 		dexpert = FreeRTOSComp
-		dexpert = ZephyrComp
-		dexpert = []
 		if not len(dexpert) == 0:
 			cCompartments = []
 			for fcomp in dexpert:
@@ -598,25 +670,130 @@ def main(argv):
 							addToCompartment(obj, comp)
 						elif ffmap[obj] == ffmap[func]:
 							addToCompartment(obj, comp)
+			#For case where files don't have any functions
+			if len(comp) == 0:
+				deleteEmptyCompartment(comp)
+
+		with open("raw_policy", 'w') as f:
+			sys.stdout = f
+			for f in files:
+				print(f)
+			sys.stdout = original_stdout
+
+				
 	
 	elif policy == "device":
-		for f in files:
-			comp = newCompartment()
-			for func in files[f]:
-				addToCompartment(func, comp)
-				if func in funcs:
-					for obj in funcs[func]:
+#		for f in files:
+#			comp = newCompartment()
+#			for func in files[f]:
+#				addToCompartment(func, comp)
+#				if func in funcs:
+#					for obj in funcs[func]:
+#						addToCompartment(obj, comp)
+#				else:
+#					print (func +"not found in anything")
+		devices = []
+		svdfmap = {} #Map SVD tuples to devices
+		handle = getSVDHandle("STMicro", "STM32F46_79x.svd")
+		resetPartitions()
+		print ("Initial Compartments count: " + str(len(compartments)))
+#		device policy needs a clean state
+		for d in dfmap:
+			print dfmap[d]
+		for addr in dfmap:
+			dev,base,size = getDevice(addr, handle)
+			if dev is None:
+				name = "unkown"
+			else:
+				name = dev.name
+			if (name,base,size) not in devices:
+				devices.append((dev,base,size))
+			if (name,base,size) in svdfmap:
+				for f in dfmap[addr]:
+					if f not in svdfmap[(name,base,size)]:
+						svdfmap[(name,base,size)].append(f)
+			else:
+				svdfmap[(name,base,size)] = []
+				for f in dfmap[addr]:
+					svdfmap[(name,base,size)].append(f)
+
+		printDevUsage = False
+		if printDevUsage:
+			for dev,base,size in svdfmap:
+				if dev is "unkown":
+					continue
+				print dev + " used by:"
+				for fun in svdfmap[(dev,base,size)]:
+				 	print "	" + str(fun)
+		i =0
+		for dev,base,size in svdfmap:
+			print dev
+			i = i+1
+
+		print str(i) + " devices found"
+
+
+		# For each device create a compartment
+		# if a user already in a compartment merge them
+		# Assign loose functions, i think we do it later anywas
+		print(svdfmap)
+		for dev,base,size in svdfmap:
+			#print ("Compartments count: " + str(len(compartments)))
+			if dev == "unkown":
+				print("-_-")
+				#continue
+			#Give a compartment to every function that doesn't have a compartment
+			comp = newCompartment() #New compartment for the device 
+#print comp
+			allcomps=[comp]
+			for fun in svdfmap[(dev,base,size)]:
+				if fun not in compartmentMap:
+					addToCompartment(fun, comp)
+					for obj in funcs[fun]:
 						addToCompartment(obj, comp)
-				else:
-					print (func +"not found in anything")
-		for dev in dfmapCoarse:
-			compartment = compartmentMap[dfmapCoarse[dev][0]]
-			for funcL in dfmapCoarse[dev]:
-				if compartment != compartmentMap[funcL]:
-					mergeCompartments(compartment, compartmentMap[funcL])
+			if len(comp) == 0:
+				#All current users are in compartments
+				print (dev + "all users alreaedy in compartments")
+				deleteEmptyCompartment(comp)
 
-	
+			#merge compartment if one device users are in different compartments
+			# if len(allcomps) > 1:
+				#print ("Merging compartments")
+				#bigcomp = newCompartment()
+#for comp in allcomps:
+#					mergeCompartments(bigcomp, comp)
 
+
+		print "There are "+ str(len(compartments)) + " compartments before merging"
+		#If this option is enabled it will place all the objects and functions in the same driver 
+		#in the same compartment before random merging
+
+		#print(compartments)
+		optionalDeviceDriverMerge = True
+		if optionalDeviceDriverMerge:
+			for comp in list(compartments):
+				for func in list(comp):				
+					#Get the file this function is in
+					if func not in ffmap and func not in datafmap:
+						print func + "not in funfileMap"
+						continue
+					if func in ffmap:
+						fil =  ffmap[func]
+					else:
+						fil = datafmap[func]
+					for drivFunc in files[fil]:
+						#if drivFunc not in compartmentMap:
+						addToCompartment(drivFunc, comp)
+
+
+
+#		for dev in dfmapCoarse:
+#			compartment = compartmentMap[dfmapCoarse[dev][0]]
+#			for funcL in dfmapCoarse[dev]:
+#				if compartment != compartmentMap[funcL]:
+#					mergeCompartments(compartment, compartmentMap[funcL])
+
+	print "There are "+ str(len(compartments)) + " compartments after merging"
 	#Assign Objects in unsed compartment
 	unusedComp = newCompartment()
 	for func in funcs:
@@ -627,46 +804,134 @@ def main(argv):
 		if var not in compartmentMap:
 			addToCompartment(var, unusedComp)
 
+#	print("***************************************")
+#	print("***************************************")
+#	print("*************after additions**********")
+#	print("***************************************")
+#	print("***************************************")
+#print(unusedComp)
+
+	for comp in list(compartments):
+		if len(comp) ==0:
+			deleteEmptyCompartment(comp)
+
+	# Merge compartments that may share data 
+	Merge = True
+	while(Merge):
+		Merge =  False 
+		for var in data:
+			users = []
+			users = compartmentMap[func]
+			compartment = None
+			#Check for all users of this data
+			ogFunc = None
+			for func in data[var]:
+			#Is this the first user compartment?
+				if ogFunc is None:
+					#Make this the big compartment, everything will be merged into it.
+					ogFunc = func
+				if compartmentMap[ogFunc] != compartmentMap[func]:
+					#mergeCompartments(compartment, compartmentMap[func])
+					print "For data:" + var
+					print func
+					print ogFunc
+					mergeCompartments(compartmentMap[ogFunc], compartmentMap[func])
+					Merge = True 		
+
 	for var in data:
 		users = []
 		users = compartmentMap[func]
 		compartment = []
+		ogFunc = None
 		for func in data[var]:
-			if len(compartment) == 0:
-				compartment = compartmentMap[func]
-			else:
-				if compartment != compartmentMap[func]:
-					print "Merging"
-#print compartment
-#					print compartmentMap[func]
-					mergeCompartments(compartment, compartmentMap[func])
-					compartment = compartmentMap[func]
-
-
-	for var in data:
-		users = []
-		users = compartmentMap[func]
-		compartment = []
-		for func in data[var]:
-			if len(compartment) == 0:
-				compartment = compartmentMap[func]
-			else:
-				if compartment != compartmentMap[func]:
+			if ogFunc is None:
+				ogFunc = func 
+			if compartmentMap[ogFunc] != compartmentMap[func]:
 					print "******************************"
 					print "*********BUG ON***************"
 					print "******************************"
-#print compartment  
+					print "For data:" + var
+					print ogFunc
+					print func
+					#print compartment  
 #				   print compartmentMap[func]
-					mergeCompartments(compartment, compartmentMap[func])
-					compartment = compartmentMap[func]
+					#mergeCompartments(compartment, compartmentMap[func])
+					#compartment = compartmentMap[func]
 
-	if len(unusedComp) == 0:
-		compartments.remove(unusedComp)
+
+
+	debugDev = False
+	## Ensure that each compartment has access to its compartment devices
+	## We dump this file in rtmk.dev so that configdata generator can fill this up
+	rtdev = open("rtmk.dev", "w")
+	svdmap = {}
+	handle = getSVDHandle("STMicro", "STM32F46_79x.svd")
+	for fun in funcs:
+		if fun in fdmap:
+			for addr in fdmap[fun]:
+				periph,base,size = getDevice(addr, handle);
+				if fun not in svdmap:
+					svdmap[fun] = [(periph,base,size)]
+				elif (periph,base,size) not in svdmap[fun]:
+					svdmap[fun].append((periph,base,size))				
+			if debugDev:
+				rtdev.write(fun +" uses: \n")
+				for dev in svdmap[fun]:
+					if dev is not None:
+						rtdev.write("	" +str(dev.name) +"\n")
+
 				
+#	for dev in handle:
+#		if  dev._address_block is not None:
+#			rtdev.write(str(dev.name) + ":" + hex(dev.base_address) + "::" +str (dev._address_block.size) + "\n")
+
+
+	compartmentDevMap = []
+	i = 0
+	for compart in compartments:
+		compartmentDevMap.append({})
+		for fun in funcs:
+			if fun in svdmap:
+				for dev in svdmap[fun]:
+					if dev is not None:
+						compartmentDevMap[i][dev] = 1
+		i += 1
+
+	# Write ranges
+	rtdeva = open("rtmk.devautogen", "w")
+	miss = False
+	for compart in compartmentDevMap:
+		print(compart)
+		for dtuple in compart:
+			dev, base, size = dtuple
+			if dev is not None:
+				rtdev.write(dev.name + ":" +hex(base)+ ":"+ hex(size))
+			else:
+				#Missing this device info
+				miss = True
+			rtdev.write("\n")
+		for dtuple in compart: 
+			minBase = 0xFFFFFFFF # Currently we only do 32bit
+			maxBase = 0
+			dev, base, size = dtuple
+			if dev is not None:
+				start = base
+				end = base +size
+				if start < minBase:
+					minBase = start
+				if end > maxBase:
+					maxBase = end
+		rtdeva.write(hex(minBase) + "," + hex(maxBase - minBase) +"," +hex(maxBase) + "\n")
+
+	if miss: 
+		print "Some Devices information was missing"
 	printStats()
+	return 
 	debugPrint = False
 	printThread = False
 
+
+	###Print stats about the compartmentalizations if 
 	if debugPrint:
 		if printThread:
 			for thread in threads:
@@ -695,9 +960,10 @@ def main(argv):
 		sobj = set(obj)
 		print("Objects in compartmenst but not in the original data: ")
 		print(s - sobj)
-	printLooseFunctions()
+		printLooseFunctions()
+		print("Total number of compartments:" +str(len(compartments)))
 #	print(compartments)
-#import pdb; pdb.set_trace();
+#   import pdb; pdb.set_trace();
 	
 
 #print(colors)

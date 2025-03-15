@@ -1,8 +1,0 @@
-UART
-1073758208
-4096
- /home/arslan/projects/LBC/FreeRTOS/FreeRTOS/Demo/CORTEX_M3_MPS2_QEMU_GCCsyscall.c 
-NVIC
-3758153728
-32
- /home/arslan/projects/LBC/FreeRTOS/FreeRTOSSource/portable/GCC/ARM_CM3/port.c 

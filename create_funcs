@@ -1,1 +1,3 @@
 xTaskCreate:1
+SafeTaskCreate:1
+k_thread_create:4

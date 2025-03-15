@@ -27,7 +27,7 @@
 #include <ctime>
 #include <unistd.h>
 #include <queue>
-
+#define FREERTOS
 using namespace SVF;
 using namespace llvm;
 using namespace std;
@@ -57,6 +57,7 @@ void printValsInFun(Function * fun);
 void pushValsInFun(Function * fun, vector<Value *>& vec, PAG *pag, vector<VFPair*> *vfp);
 bool isIntrinsic(string target);
 void getFunctionfromUse(User * muse, vector<Function *>& users, int depth);
+std::fstream& GotoLine(std::fstream& file, unsigned int num);
 
 
 #define vContains(v, arg) (std::find(v.begin(), v.end(), arg) != v.end())
@@ -94,6 +95,7 @@ Value * createGlobalPointer(Module * mod, Type * ty, string name);
 Value * createGlobal(Module * mod, Type * ty, string name);
 int testPass();
 void updateBC();
+void printBanner(std::string s);
 
 
 typedef struct {
@@ -108,10 +110,13 @@ extern map<unsigned int,map<string, int>> refcount;
 typedef struct {
         std::string name;
         std::string driver;
+		std::string base;
         unsigned int size;
 } desc;
 extern map<int, string> device;
 extern llvm::cl::opt<std::string> InputFilename;
+extern llvm::cl::opt<std::string> kleeFile;
+extern llvm::cl::opt<std::string> partGuide;
 #if 0
 llvm::cl::opt<std::string> KernFuncs(cl::Positional, llvm::cl::desc("<kernel functions>"), cl::Required);
 llvm::cl::opt<std::string> UserFuncs(cl::Positional, llvm::cl::desc("<user functions>"), cl::Required);
@@ -125,3 +130,4 @@ llvm::cl::opt<bool> LEAKCHECKER("leak", llvm::cl::init(false),
 extern llvm::cl::opt<bool> PRINT_PTS_TO;
 extern llvm::cl::opt<bool> DUMP;
 #endif 
+int analyze();

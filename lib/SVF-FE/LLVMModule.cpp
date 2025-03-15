@@ -33,6 +33,7 @@
 #include "Util/SVFUtil.h"
 #include "SVF-FE/LLVMUtil.h"
 #include "SVF-FE/SymbolTableInfo.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 
 using namespace std;
 using namespace SVF;

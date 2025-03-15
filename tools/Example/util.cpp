@@ -26,6 +26,8 @@
  // Author: Yulei Sui,
  */
 #include "util.h"
+#include <fstream>
+#include <limits>
 
 vector<VFPair *> vfp;
 vector<Value *> vec;
@@ -52,6 +54,10 @@ llvm::cl::opt<std::string> UserFuncs(cl::Positional, llvm::cl::desc("<user funct
 llvm::cl::opt<std::string> SafeFuncs(cl::Positional, llvm::cl::desc("<safelist functions>"), cl::Required);
 llvm::cl::opt<std::string> TaskCreateFuncs(cl::Positional, llvm::cl::desc("<Task Create functions>"), cl::Required);
 llvm::cl::opt<std::string> IOMAP(cl::Positional, llvm::cl::desc("<IO Map for the device compiled"), cl::Required);
+llvm::cl::opt<std::string> kleeFile("k", llvm::cl::desc("<KLEE Compatible bc for taint analysis/symex>"), cl::Optional);
+
+llvm::cl::opt<std::string> partGuide("p", llvm::cl::desc("<KLEE Compatible bc for taint analysis/symex>"), cl::Optional);
+
 
 llvm::cl::opt<bool> LEAKCHECKER("leak", llvm::cl::init(false),
                                        llvm::cl::desc("Memory Leak Detection"));
@@ -83,6 +89,15 @@ std::string gen_random(const int len) {
 
 }
 
+
+
+std::fstream& GotoLine(std::fstream& file, unsigned int num){
+    file.seekg(std::ios::beg);
+    for(int i=0; i < num - 1; ++i){
+        file.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
+    }
+    return file;
+}
 
 void dumper(Value * val) {
 		cerr << "***************************************************" <<endl;
@@ -284,6 +299,56 @@ void parseArguments(int argc, char ** argv) {
     }
 
 }
+SVFModule* build_module() {
+	return LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(moduleNameVec);
+}
+
+PAG * build_pag(SVFModule* svfModule) {
+	PAGBuilder builder;
+    return builder.build(svfModule);
+}
+
+Type* getInnermostPointedToType(Type* type) {
+        while (type->isArrayTy() || type->isPointerTy()) {
+                if (type->isArrayTy()) {
+                        type = cast<ArrayType>(type)->getElementType();
+                } else if (type->isPointerTy()) {
+                        type = cast<PointerType>(type)->getElementType();
+                }
+        }
+        return type;
+}
+
+void buil_pta(PAG * pag) {
+	// Create Andersen's pointer analysis
+    //ander = AndersenWaveDiff::createAndersenWaveDiff(pag); TODO: This threw error will uncomment later
+    //Create FlowSensitiveTBHC
+    FlowSensitiveTBHC fspta= FlowSensitiveTBHC(pag);
+  //  static FlowSensitive fsptal = FlowSensitive(pag);
+}
+PTACallGraph* build_pta_callgraph() {
+        /// ICFG
+  //  ICFG* icfg = pag->getICFG();
+	return fspta->getPTACallGraph();
+}
+VFG * build_vfg(PTACallGraph* callgraph) {
+	return new VFG(callgraph);
+}
+
+SVFG * build_svfg() {
+	/// Sparse value-flow graph (SVFG)
+    SVFGBuilder svfBuilder(true);
+    return svfBuilder.buildFullSVFG(fspta);
+}
+
+llvm::Module * getLLVM_Module(SVFModule * svfmodule) {
+	SVFModule::llvm_iterator F = svfModule->llvmFunBegin();
+    Function *fun = *F;
+    ll_mod = fun->getParent();
+	return ll_mod;
+}
+
+
 void buildPTA() {
 	svfModule = LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(moduleNameVec);
     PAGBuilder builder;
@@ -293,11 +358,32 @@ void buildPTA() {
     //Create FlowSensitiveTBHC
     //FlowSensitiveTBHC fspta= FlowSensitiveTBHC(pag);
     static FlowSensitive fsptal = FlowSensitive(pag);
-#if 01 // TODO: 
+	//Uncomment for PTA
+#if 01 
     fsptal.initialize();
     fsptal.analyze();
 	fspta = &fsptal;
 #endif 
+
+#if 01
+//	PTACallGraph* callgraph = fspta->getPTACallGraph();
+	    /// ICFG
+  //  ICFG* icfg = pag->getICFG();
+    //icfg->dump("icfg");
+
+    /// Value-Flow Graph (VFG)
+//    VFG* vfg = new VFG(callgraph);
+//	vfg->dump("vfg");
+
+    /// Sparse value-flow graph (SVFG)
+ //   SVFGBuilder svfBuilder(true);
+ //   SVFG* svfg = svfBuilder.buildFullSVFG(fspta);
+
+	//svfg->dump("svfg");
+
+
+#endif 
+
 	SVFModule::llvm_iterator F = svfModule->llvmFunBegin();
 	Function *fun = *F;
 	ll_mod = fun->getParent();
@@ -322,16 +408,45 @@ void getTasks() {
 		if (!init) {
 		init = true;
 		std::ofstream threadD("threads.txt", std::ofstream::out);
+		
+
+		/* Get static threads for Zephyr */
+        for (auto G = svfModule->global_begin(), E = svfModule->global_end(); G != E; ++G) {
+                auto glob = &*G;
+                if ((*glob)->getName().str().find("_k_thread_data_") != std::string::npos) {
+//                        printBanner((*glob)->getName().str());
+                        auto init = (*glob)->getInitializer();
+                        if (auto cast = dyn_cast<llvm::User>(init->getOperand(3))) {
+                                auto op = cast->getOperand(0);
+                                if (auto task =  dyn_cast<llvm::Function>(op)) {
+                                    string kernel_thread = "kernel";
+                                    bool isKernelThread = false;
+                                    if (task->getSection().str().find(kernel_thread) != std::string::npos) {
+                                        isKernelThread = true;
+                                    }
+                                    threadD<<task->getName().str() <<(isKernelThread? ":Kernel": ":User")<<endl;
+                                    TCB tcb;
+                                    tcb.name = task->getName().str();
+                                    tcb.func = task;
+
+                                    if (!isKernelThread)
+                                        pushValsInFun(task, tcb.objects,pag,NULL);
+                                }
+                        }
+                }
+        }
 		for (SVFModule::llvm_iterator F = svfModule->llvmFunBegin(), E = svfModule->llvmFunEnd(); F != E; ++F) {
         //const SVFFunction* fun = LLVMModuleSet::getLLVMModuleSet()->getSVFFunction(*F);
         Function *fun = *F;
         Value * val = (Value *)fun;
         //cout << (*F)->getName().str()<<endl;
         auto name = (*F)->getName().data();
+
         /* Get all tasks */
         if(creators.count(name)) {
             /* Find all callers of this function */
             for(auto U : val->users()){
+					int arg =0;
                     for(auto op: U->operand_values()) {
                             /* Here we can explicitly get the function
                                using the argument information, however instead
@@ -345,11 +460,19 @@ void getTasks() {
                             if (auto task= dyn_cast<llvm::Function>(op)) {
                                 if(task->getName().str() == name)
                                         continue;
-								threadD<<task->getName().str()<<endl;
+
+								string kernel_thread = "kernel";
+								bool isKernelThread = false;
+				                if (task->getSection().str().find(kernel_thread) != std::string::npos) {
+                			        isKernelThread = true;
+                				}
+
+								threadD<<task->getName().str() <<(isKernelThread? ":Kernel": ":User")<<endl;
 
                                 TCB tcb;
                                 tcb.name = task->getName().str();
                                 tcb.func = task;
+								
 #if 0
                                 for (auto bb=task->begin();bb!=task->end();bb++) {
                                         for (auto stmt =bb->begin();stmt!=bb->end(); stmt++) {
@@ -357,10 +480,21 @@ void getTasks() {
                                         }
                                 }
 #endif
-                                pushValsInFun(task, tcb.objects,pag,NULL);
+								if (!isKernelThread) 
+								{
+	                                pushValsInFun(task, tcb.objects,pag,NULL);
 
-                                tasks.push_back(tcb);
+    	                            tasks.push_back(tcb);
+								}
                             }
+							else {
+									U->dump();
+#ifdef FREERTOS
+									if (arg==0)
+									cerr<<"ThreadDiscoveryError: Could not figure out the caller!"<<endl;
+#endif
+							}
+							arg++;
 					}
             }
         }
@@ -426,14 +560,25 @@ void updateBC() {
         std::error_code EC;
             //raw_fd_ostream output = raw_fd_ostream("temp.bc", EC); error: use of deleted function ‘llvm::raw_fd_ostream::raw_fd_ostream(const llvm::raw_fd_ostream&)’
 		verifyModule(*ll_mod);
+		//Holy Grail of debug
+		ll_mod->dump();
         raw_fd_ostream output("temp.bc", EC);
         llvm::WriteBitcodeToFile(*ll_mod, output);
 		cerr<<"temp.bc updated"<<endl;
 
+#if 00
 		for (SVFModule::llvm_iterator F = svfModule->llvmFunBegin(), E = svfModule->llvmFunEnd(); F != E; ++F) {
         	auto fun = *F;
 			//fun->dump();
+			if (fun->getName().str() == "test_etsan") {
+					for (auto bb=fun->begin();bb!=fun->end();bb++) {
+							for (auto stmt =bb->begin();stmt!=bb->end(); stmt++) {
+									stmt->dump();
+							}
+					}
+			}
 		}
+#endif 
 }
 
 static int i=0;
@@ -503,3 +648,25 @@ void getFunctionfromUse(User * muse, vector<Function *>& users, int depth) {
 		}
 }
 
+
+
+void printBanner(string s) {
+	cout<<"#############################################################"<<endl;
+	cout<<"#                    _                                      #"<<endl;
+	cout<<"#                  -=\\`\\                                    #"<<endl;
+	cout<<"#              |\\ ____\\_\\__                                 #"<<endl;
+	cout<<"#            -=\\c`""""""" "`)                               #"<<endl;
+	cout<<"#                 -==/ /                                    #"<<endl;
+	cout<<"#                   '-'                                     #"<<endl;
+	cout<<"#                  _  _                                     #"<<endl;
+	cout<<s<<endl;
+	cout<<"#                 ( `   )_                                  #"<<endl;
+	cout<<"#                (    )    `)                               #"<<endl;
+	cout<<"#              (_   (_ .  _) _)                             #"<<endl;
+	cout<<"#                                             _             #"<<endl;
+	cout<<"#                                            (  )           #"<<endl;
+	cout<<"#             _ .                         ( `  ) . )        #"<<endl;
+	cout<<"#           (  _ )_                      (_, _(  ,_)_)      #"<<endl;
+	cout<<"#         (_  _(_ ,)                                        #"<<endl;
+	cout<<"#############################################################"<<endl;
+}
