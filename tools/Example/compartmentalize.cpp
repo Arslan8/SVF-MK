@@ -2029,7 +2029,8 @@ int compartmentalize(char * argv[]) {
 				}
 
 				for (auto bb=fun->begin();bb!=fun->end();bb++) {
-						for (auto stmt =bb->begin();stmt!=bb->end(); stmt++) {
+						for (auto stmt =bb->begin(), it(stmt);stmt!=bb->end(); stmt = it) {
+								it++;
 								auto callerID  = compartmentMap[fun->getName().str()];
 								if (auto ci= dyn_cast<llvm::CallInst> (stmt)) {
 										if (ci->isInlineAsm ()) continue; /* TODO: Currently we don't cater to inline asm */
@@ -2052,8 +2053,6 @@ int compartmentalize(char * argv[]) {
 												string llvm = "llvm";
 												if (callee->getName().str().find(llvm) != std::string::npos) continue;
 												IRBuilder<> Builder(stmt->getParent());
-												BasicBlock::iterator it(stmt);it--;
-												//Builder.SetInsertPoint(stmt->getNextNode()->getPrevNode());
 												directCall[callerID]++;
 												promoteXCall(ci, callee, stmt);
 										}
