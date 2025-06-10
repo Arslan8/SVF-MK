@@ -1760,7 +1760,9 @@ int compartmentalize(char * argv[]) {
 						}
 						debug<<go->getName().str()<<":"<<endl;
 						debug<<"moved from "<<go->getSection().str()<< " to ";
-						auto compartmentID = compartmentMap[go->getName().str()]; 
+						auto compartmentID = compartmentMap[go->getName().str()];
+
+						if (compartmentID ==0) continue;
 						//StringRef s = ".object_section" + std::to_string(compartmentID);
 						StringRef s = ".osection" + std::to_string(compartmentID);
 						auto *gv = llvm::cast<llvm::GlobalVariable>(go);
@@ -1799,9 +1801,10 @@ int compartmentalize(char * argv[]) {
                         continue;
                 }
 
+				auto compartmentID = compartmentMap[fun->getName().str()];
+				if (compartmentID == 0) continue;
 				debug<<fun->getName().str()<<":" <<endl;
 				debug<<"moved from "<<fun->getSection().str()<< " to ";
-				auto compartmentID = compartmentMap[fun->getName().str()];
 				StringRef s = ".csection" + std::to_string(compartmentID);
 				fun->setSection(s);
 				debug<<fun->getSection().str()<<endl;
@@ -2028,10 +2031,13 @@ int compartmentalize(char * argv[]) {
 						continue;
 				}
 
+				auto callerID  = compartmentMap[fun->getName().str()];
+
+				if ( callerID == 0) continue;
+
 				for (auto bb=fun->begin();bb!=fun->end();bb++) {
 						for (auto stmt =bb->begin(), it(stmt);stmt!=bb->end(); stmt = it) {
 								it++;
-								auto callerID  = compartmentMap[fun->getName().str()];
 								if (auto ci= dyn_cast<llvm::CallInst> (stmt)) {
 										if (ci->isInlineAsm ()) continue; /* TODO: Currently we don't cater to inline asm */
 										auto callee = ci->getCalledFunction ();
